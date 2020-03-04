@@ -147,8 +147,8 @@ class NNTrain:
 
     '''
 
-    def __init__(self, num_neurons = 300, num_steps=10000, learning_rate=1.e-4, batch_size=512,\
-             num_features = 64*5, mask_size=11, num_pixel=7214, batch_size_valid=128):
+    def __init__(self, num_neurons = 300, num_steps=10000, learning_rate=1.e-4, batch_size=256,\
+             num_features = 64*5, mask_size=11, num_pixel=7214, batch_size_valid=32):
         self.num_neurons = num_neurons
         self.num_steps = int(num_steps)
         self.learning_rate = learning_rate
@@ -156,7 +156,7 @@ class NNTrain:
         self.num_features = num_features
         self.mask_size = mask_size
         self.num_pixel = num_pixel
-
+        self.batch_size_valid = batch_size_valid 
         self.CUDA = False
 
 
@@ -244,7 +244,7 @@ class NNTrain:
             loss_valid /= self.nbatches_valid
             self.loss_valid = loss_valid
 
-            loss_data = loss.detach().data.item()
+            loss_data = self.loss.detach().data.item()
             loss_valid_data = loss_valid.detach().data.item()
             self.training_loss.append(loss_data)
             self.validation_loss.append(loss_valid_data)
@@ -265,6 +265,8 @@ class NNTrain:
         # scale the labels, optimizing neural networks is easier if the labels are more normalized
         x_max = np.max(training_labels, axis = 0)
         x_min = np.min(training_labels, axis = 0)
+        self.x_max = x_max
+        self.x_min = x_min
         x = (training_labels - x_min)/(x_max - x_min) - 0.5
         x_valid = (validation_labels-x_min)/(x_max-x_min) - 0.5
 
@@ -297,8 +299,8 @@ class NNTrain:
                 b_array_0 = b_array_0,\
                 b_array_1 = b_array_1,\
                 b_array_2 = b_array_2,\
-                x_max=x_max,\
-                x_min=x_min,)
+                x_max=self.x_max,\
+                x_min=self.x_min,)
 
 
 

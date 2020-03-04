@@ -37,6 +37,8 @@ print(valid_spec.shape)
 print(train_lbl.shape)
 print(valid_lbl.shape)
 
-neural_net(train_lbl, train_spec, valid_lbl, valid_spec)
+NNT = NNTrain()
+
+NNT.train(train_lbl, train_spec, valid_lbl, valid_spec)
 
         
