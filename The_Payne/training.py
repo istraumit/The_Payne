@@ -18,21 +18,21 @@ The default training set are the Kurucz synthetic spectral models and have been
 convolved to the appropriate R (~22500 for APOGEE) with the APOGEE LSF.
 '''
 
-from __future__ import absolute_import, division, print_function # python2 compatibility
+#from __future__ import absolute_import, division, print_function # python2 compatibility
 import numpy as np
 import sys
 import os
 import torch
 import time
 from torch.autograd import Variable
-from . import radam
+import radam
 
 
 #===================================================================================================
 # simple multi-layer perceptron model
-class Payne_model(torch.nn.Module):
-    def __init__(self, dim_in, num_neurons, num_features, mask_size, num_pixel):
-        super(Payne_model, self).__init__()
+class Perceptron(torch.nn.Module):
+    def __init__(self, dim_in, num_neurons, num_pixel):
+        super().__init__()
         self.features = torch.nn.Sequential(
             torch.nn.Linear(dim_in, num_neurons),
             torch.nn.LeakyReLU(),
@@ -46,10 +46,9 @@ class Payne_model(torch.nn.Module):
 
 #---------------------------------------------------------------------------------------------------
 # resnet models
-'''
-class Payne_model(torch.nn.Module):
+class Resnet(torch.nn.Module):
     def __init__(self, dim_in, num_neurons, num_features, mask_size, num_pixel):
-        super(Payne_model, self).__init__()
+        super().__init__()
         self.features = torch.nn.Sequential(
             torch.nn.Linear(dim_in, num_neurons),
             torch.nn.LeakyReLU(),
@@ -107,14 +106,8 @@ class Payne_model(torch.nn.Module):
 
         x7 = self.deconv7(x6)[:,0,:self.num_pixel]
         return x7
-'''
 
-#===================================================================================================
-# train neural networks
-def neural_net(training_labels, training_spectra, validation_labels, validation_spectra,\
-             num_neurons = 300, num_steps=1e4, learning_rate=1e-4, batch_size=512,\
-             num_features = 64*5, mask_size=11, num_pixel=7214):
-
+class NNTrain:
     '''
     Training a neural net to emulate spectral models
 
@@ -154,148 +147,169 @@ def neural_net(training_labels, training_spectra, validation_labels, validation_
 
     '''
 
-    # run on cuda
-    dtype = torch.cuda.FloatTensor
-    torch.set_default_tensor_type('torch.cuda.FloatTensor')
+    def __init__(self, num_neurons = 300, num_steps=10000, learning_rate=1.e-4, batch_size=512,\
+             num_features = 64*5, mask_size=11, num_pixel=7214, batch_size_valid=128):
+        self.num_neurons = num_neurons
+        self.num_steps = int(num_steps)
+        self.learning_rate = learning_rate
+        self.batch_size = batch_size
+        self.num_features = num_features
+        self.mask_size = mask_size
+        self.num_pixel = num_pixel
 
-    # scale the labels, optimizing neural networks is easier if the labels are more normalized
-    x_max = np.max(training_labels, axis = 0)
-    x_min = np.min(training_labels, axis = 0)
-    x = (training_labels - x_min)/(x_max - x_min) - 0.5
-    x_valid = (validation_labels-x_min)/(x_max-x_min) - 0.5
+        self.CUDA = False
 
-    # dimension of the input
-    dim_in = x.shape[1]
 
-#--------------------------------------------------------------------------------------------
-    # assume L1 loss
-    loss_fn = torch.nn.L1Loss(reduction = 'mean')
+    def train(self, training_labels, training_spectra, validation_labels, validation_spectra):
+        # run on cuda
+        if self.CUDA:
+            self.dtype = torch.cuda.FloatTensor
+            torch.set_default_tensor_type('torch.cuda.FloatTensor')
+        else:
+            self.dtype = torch.FloatTensor
+            torch.set_default_tensor_type('torch.FloatTensor')
 
-    # make pytorch variables
-    x = Variable(torch.from_numpy(x)).type(dtype)
-    y = Variable(torch.from_numpy(training_spectra), requires_grad=False).type(dtype)
-    x_valid = Variable(torch.from_numpy(x_valid)).type(dtype)
-    y_valid = Variable(torch.from_numpy(validation_spectra), requires_grad=False).type(dtype)
+        x, y, x_valid, y_valid = self.scale_variables(training_labels, training_spectra, validation_labels, validation_spectra)
 
-    # initiate Payne and optimizer
-    model = Payne_model(dim_in, num_neurons, num_features, mask_size, num_pixel)
-    model.cuda()
-    model.train()
+        # assume L1 loss
+        self.loss_fn = torch.nn.L1Loss(reduction = 'mean')
 
-    # we adopt rectified Adam for the optimization
-    optimizer = radam.RAdam([p for p in model.parameters() if p.requires_grad==True], lr=learning_rate)
+        # initiate Payne and optimizer
+        model = Perceptron(x.shape[1], self.num_neurons, self.num_pixel)
+        if self.CUDA:
+            model.cuda()
+        model.train()
+        self.model = model
 
-#--------------------------------------------------------------------------------------------
-    # train in batches
-    nsamples = x.shape[0]
-    nbatches = nsamples // batch_size
+        # we adopt rectified Adam for the optimization
+        self.optimizer = radam.RAdam([p for p in model.parameters() if p.requires_grad==True], lr=self.learning_rate)
 
-    nsamples_valid = x_valid.shape[0]
-    nbatches_valid = nsamples_valid // batch_size
+    #--------------------------------------------------------------------------------------------
+        # train in batches
+        self.batch_init(x, x_valid)
 
-    # initiate counter
-    current_loss = np.inf
-    training_loss =[]
-    validation_loss = []
+        for e in range(self.num_steps):
+            self.step(x, y)
+            # evaluate validation loss
+            if e % 100 == 0:
+                self.validate(x_valid, y_valid)
+                print('iter %s:' % e, 'training loss = %.3f' % self.loss,\
+                     'validation loss = %.3f' % self.loss_valid)
 
-#-------------------------------------------------------------------------------------------------------
-    # train the network
-    for e in range(int(num_steps)):
 
+
+    def batch_init(self, x, x_valid):
+        self.nsamples = x.shape[0]
+        self.nbatches = self.nsamples // self.batch_size
+
+        self.nsamples_valid = x_valid.shape[0]
+        self.nbatches_valid = self.nsamples_valid // self.batch_size_valid
+
+        # initiate counter
+        self.current_loss = np.inf
+        self.training_loss =[]
+        self.validation_loss = []
+
+    def step(self, x, y):
         # randomly permute the data
-        perm = torch.randperm(nsamples)
-        perm = perm.cuda()
+        perm = torch.randperm(self.nsamples)
+        if self.CUDA:
+            perm = perm.cuda()
 
         # for each batch, calculate the gradient with respect to the loss
-        for i in range(nbatches):
-            idx = perm[i * batch_size : (i+1) * batch_size]
-            y_pred = model(x[idx])
+        for i in range(self.nbatches):
+            idx = perm[i * self.batch_size : (i+1) * self.batch_size]
+            y_pred = self.model(x[idx])
 
-            loss = loss_fn(y_pred, y[idx])*1e4
-            optimizer.zero_grad()
-            loss.backward(retain_graph=False)
-            optimizer.step()
+            self.loss = self.loss_fn(y_pred, y[idx])*1.e4
+            self.optimizer.zero_grad()
+            self.loss.backward(retain_graph=False)
+            self.optimizer.step()
 
-#-------------------------------------------------------------------------------------------------------
-        # evaluate validation loss
-        if e % 100 == 0:
+
+    def validate(self, x_valid, y_valid):
 
             # here we also break into batches because when training ResNet
             # evaluating the whole validation set could go beyond the GPU memory
             # if needed, this part can be simplified to reduce overhead
-            perm_valid = torch.randperm(nsamples_valid)
-            perm_valid = perm_valid.cuda()
+            perm_valid = torch.randperm(self.nsamples_valid)
+            if self.CUDA:
+                perm_valid = perm_valid.cuda()
+
             loss_valid = 0
-
-            for j in range(nbatches_valid):
-                idx = perm_valid[j * batch_size : (j+1) * batch_size]
-                y_pred_valid = model(x_valid[idx])
-                loss_valid += loss_fn(y_pred_valid, y_valid[idx])*1e4
-            loss_valid /= nbatches_valid
-
-            print('iter %s:' % e, 'training loss = %.3f' % loss,\
-                 'validation loss = %.3f' % loss_valid)
+            for j in range(self.nbatches_valid):
+                idx = perm_valid[j * self.batch_size_valid : (j+1) * self.batch_size_valid]
+                y_pred_valid = self.model(x_valid[idx])
+                loss_valid += self.loss_fn(y_pred_valid, y_valid[idx])*1.e4
+            loss_valid /= self.nbatches_valid
+            self.loss_valid = loss_valid
 
             loss_data = loss.detach().data.item()
             loss_valid_data = loss_valid.detach().data.item()
-            training_loss.append(loss_data)
-            validation_loss.append(loss_valid_data)
+            self.training_loss.append(loss_data)
+            self.validation_loss.append(loss_valid_data)
 
 #--------------------------------------------------------------------------------------------
             # record the weights and biases if the validation loss improves
-            if loss_valid_data < current_loss:
-                current_loss = loss_valid_data
-                model_numpy = []
-                for param in model.parameters():
-                    model_numpy.append(param.data.cpu().numpy())
-
-                # extract the weights and biases
-                w_array_0 = model_numpy[0]
-                b_array_0 = model_numpy[1]
-                w_array_1 = model_numpy[2]
-                b_array_1 = model_numpy[3]
-                w_array_2 = model_numpy[4]
-                b_array_2 = model_numpy[5]
-
-                # save parameters and remember how we scaled the labels
-                np.savez("NN_normalized_spectra.npz",\
-                        w_array_0 = w_array_0,\
-                        w_array_1 = w_array_1,\
-                        w_array_2 = w_array_2,\
-                        b_array_0 = b_array_0,\
-                        b_array_1 = b_array_1,\
-                        b_array_2 = b_array_2,\
-                        x_max=x_max,\
-                        x_min=x_min,)
-
+            if loss_valid_data < self.current_loss:
+                self.current_loss = loss_valid_data
+                self.save_NN()
                 # save the training loss
                 np.savez("training_loss.npz",\
-                         training_loss = training_loss,\
-                         validation_loss = validation_loss)
+                         training_loss = self.training_loss,\
+                         validation_loss = self.validation_loss)
 
-#--------------------------------------------------------------------------------------------
-    # extract the weights and biases
-    w_array_0 = model_numpy[0]
-    b_array_0 = model_numpy[1]
-    w_array_1 = model_numpy[2]
-    b_array_1 = model_numpy[3]
-    w_array_2 = model_numpy[4]
-    b_array_2 = model_numpy[5]
 
-    # save parameters and remember how we scaled the labels
-    np.savez("NN_normalized_spectra.npz",\
-             w_array_0 = w_array_0,\
-             w_array_1 = w_array_1,\
-             w_array_2 = w_array_2,\
-             b_array_0 = b_array_0,\
-             b_array_1 = b_array_1,\
-             b_array_2 = b_array_2,\
-             x_max=x_max,\
-             x_min=x_min,)
+    def scale_variables(self, training_labels, training_spectra, validation_labels, validation_spectra):
+        dtype = self.dtype
+        # scale the labels, optimizing neural networks is easier if the labels are more normalized
+        x_max = np.max(training_labels, axis = 0)
+        x_min = np.min(training_labels, axis = 0)
+        x = (training_labels - x_min)/(x_max - x_min) - 0.5
+        x_valid = (validation_labels-x_min)/(x_max-x_min) - 0.5
 
-    # save the final training loss
-    np.savez("training_loss.npz",\
-             training_loss = training_loss,\
-             validation_loss = validation_loss)
+        # make pytorch variables
+        x = Variable(torch.from_numpy(x)).type(dtype)
+        y = Variable(torch.from_numpy(training_spectra), requires_grad=False).type(dtype)
+        x_valid = Variable(torch.from_numpy(x_valid)).type(dtype)
+        y_valid = Variable(torch.from_numpy(validation_spectra), requires_grad=False).type(dtype)
 
-    return
+        return x, y, x_valid, y_valid
+
+    def save_NN(self):
+        model_numpy = []
+        for param in self.model.parameters():
+            model_numpy.append(param.data.cpu().numpy())
+
+        # extract the weights and biases
+        w_array_0 = model_numpy[0]
+        b_array_0 = model_numpy[1]
+        w_array_1 = model_numpy[2]
+        b_array_1 = model_numpy[3]
+        w_array_2 = model_numpy[4]
+        b_array_2 = model_numpy[5]
+
+        # save parameters and remember how we scaled the labels
+        np.savez("NN_normalized_spectra.npz",\
+                w_array_0 = w_array_0,\
+                w_array_1 = w_array_1,\
+                w_array_2 = w_array_2,\
+                b_array_0 = b_array_0,\
+                b_array_1 = b_array_1,\
+                b_array_2 = b_array_2,\
+                x_max=x_max,\
+                x_min=x_min,)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
