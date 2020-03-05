@@ -159,6 +159,20 @@ class NNTrain:
         self.batch_size_valid = batch_size_valid 
         self.CUDA = False
 
+    def train_on_npz(self, npz_path, validation_fraction=0.1):
+        data = np.load(npz_path)
+        spectra = data['spectra']
+        labels  = data['labels']
+        N_total = spectra.shape[0]
+        N_valid = int(N_total * validation_fraction)
+
+        validation_spectra = spectra[:N_valid,:]
+        validation_labels = labels[:,:N_valid]
+        training_spectra = spectra[N_valid:,:]
+        training_labels = labels[:,N_valid:]
+
+        self.train(training_labels.T, training_spectra, validation_labels.T, validation_spectra)
+
 
     def train(self, training_labels, training_spectra, validation_labels, validation_spectra):
         # run on cuda
@@ -229,35 +243,35 @@ class NNTrain:
 
     def validate(self, x_valid, y_valid):
 
-            # here we also break into batches because when training ResNet
-            # evaluating the whole validation set could go beyond the GPU memory
-            # if needed, this part can be simplified to reduce overhead
-            perm_valid = torch.randperm(self.nsamples_valid)
-            if self.CUDA:
-                perm_valid = perm_valid.cuda()
+        # here we also break into batches because when training ResNet
+        # evaluating the whole validation set could go beyond the GPU memory
+        # if needed, this part can be simplified to reduce overhead
+        perm_valid = torch.randperm(self.nsamples_valid)
+        if self.CUDA:
+            perm_valid = perm_valid.cuda()
 
-            loss_valid = 0
-            for j in range(self.nbatches_valid):
-                idx = perm_valid[j * self.batch_size_valid : (j+1) * self.batch_size_valid]
-                y_pred_valid = self.model(x_valid[idx])
-                loss_valid += self.loss_fn(y_pred_valid, y_valid[idx])*1.e4
-            loss_valid /= self.nbatches_valid
-            self.loss_valid = loss_valid
+        loss_valid = 0
+        for j in range(self.nbatches_valid):
+            idx = perm_valid[j * self.batch_size_valid : (j+1) * self.batch_size_valid]
+            y_pred_valid = self.model(x_valid[idx])
+            loss_valid += self.loss_fn(y_pred_valid, y_valid[idx])*1.e4
+        loss_valid /= self.nbatches_valid
+        self.loss_valid = loss_valid
 
-            loss_data = self.loss.detach().data.item()
-            loss_valid_data = loss_valid.detach().data.item()
-            self.training_loss.append(loss_data)
-            self.validation_loss.append(loss_valid_data)
+        loss_data = self.loss.detach().data.item()
+        loss_valid_data = loss_valid.detach().data.item()
+        self.training_loss.append(loss_data)
+        self.validation_loss.append(loss_valid_data)
 
 #--------------------------------------------------------------------------------------------
-            # record the weights and biases if the validation loss improves
-            if loss_valid_data < self.current_loss:
-                self.current_loss = loss_valid_data
-                self.save_NN()
-                # save the training loss
-                np.savez("training_loss.npz",\
-                         training_loss = self.training_loss,\
-                         validation_loss = self.validation_loss)
+        # record the weights and biases if the validation loss improves
+        if loss_valid_data < self.current_loss:
+            self.current_loss = loss_valid_data
+            self.save_NN()
+            # save the training loss
+            np.savez("training_loss.npz",\
+                     training_loss = self.training_loss,\
+                     validation_loss = self.validation_loss)
 
 
     def scale_variables(self, training_labels, training_spectra, validation_labels, validation_spectra):
