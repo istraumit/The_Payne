@@ -96,7 +96,7 @@ class NNTrain:
         self.mask_size = mask_size
         self.num_pixel = num_pixel
         self.batch_size_valid = batch_size_valid 
-        self.CUDA = True
+        self.CUDA = torch.cuda.is_available()
 
     def train_on_npz(self, npz_path, validation_fraction=0.1):
         data = np.load(npz_path)
@@ -105,11 +105,15 @@ class NNTrain:
         N_total = spectra.shape[0]
         N_valid = int(N_total * validation_fraction)
 
+        idx = torch.randperm(N_total)
+        idx_valid = idx[:N_valid]
+        idx_train = idx[N_valid:]
+
         #assuming that the grid is random
-        validation_spectra = spectra[:N_valid,:]
-        validation_labels = labels[:,:N_valid]
-        training_spectra = spectra[N_valid:,:]
-        training_labels = labels[:,N_valid:]
+        validation_spectra = spectra[idx_valid,:]
+        validation_labels = labels[:,idx_valid]
+        training_spectra = spectra[idx_train,:]
+        training_labels = labels[:,idx_train]
 
         if self.batch_size_valid>N_valid:
             self.batch_size_valid = N_valid
