@@ -18,7 +18,7 @@ The default training set are the Kurucz synthetic spectral models and have been
 convolved to the appropriate R (~22500 for APOGEE) with the APOGEE LSF.
 '''
 
-#from __future__ import absolute_import, division, print_function # python2 compatibility
+from __future__ import absolute_import, division, print_function # python2 compatibility
 import numpy as np
 import sys
 import os
@@ -32,7 +32,7 @@ import radam
 # simple multi-layer perceptron model
 class Perceptron(torch.nn.Module):
     def __init__(self, dim_in, num_neurons, num_pixel):
-        super().__init__()
+        super(Perceptron, self).__init__()
         self.features = torch.nn.Sequential(
             torch.nn.Linear(dim_in, num_neurons),
             torch.nn.LeakyReLU(),
@@ -86,8 +86,8 @@ class NNTrain:
 
     '''
 
-    def __init__(self, num_neurons = 300, num_steps=10000, learning_rate=1.e-4, batch_size=256,\
-             num_features = 64*5, mask_size=11, num_pixel=7214, batch_size_valid=32):
+    def __init__(self, num_neurons = 300, num_steps=10000, learning_rate=1.e-4, batch_size=64,\
+             num_features = 64*5, mask_size=11, num_pixel=7214, batch_size_valid=64):
         self.num_neurons = num_neurons
         self.num_steps = int(num_steps)
         self.learning_rate = learning_rate
@@ -96,7 +96,7 @@ class NNTrain:
         self.mask_size = mask_size
         self.num_pixel = num_pixel
         self.batch_size_valid = batch_size_valid 
-        self.CUDA = False
+        self.CUDA = True
 
     def train_on_npz(self, npz_path, validation_fraction=0.1):
         data = np.load(npz_path)

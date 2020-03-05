@@ -1,9 +1,14 @@
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 from training import *
 
-NNT = NNTrain()
+bs = int(sys.argv[1])
 
-NNT.train_on_npz('other_data\\kurucz_training_spectra.npz')
+NNT = NNTrain(batch_size=bs, batch_size_valid=bs)
 
-        
+NNT.train_on_npz('other_data/kurucz_training_spectra.npz', validation_fraction=0.5)
+
+
+
+
