@@ -166,10 +166,14 @@ class NNTrain:
         N_total = spectra.shape[0]
         N_valid = int(N_total * validation_fraction)
 
+        #assuming that the grid is random
         validation_spectra = spectra[:N_valid,:]
         validation_labels = labels[:,:N_valid]
         training_spectra = spectra[N_valid:,:]
         training_labels = labels[:,N_valid:]
+
+        if self.batch_size_valid>N_valid:
+            self.batch_size_valid = N_valid
 
         self.train(training_labels.T, training_spectra, validation_labels.T, validation_spectra)
 
