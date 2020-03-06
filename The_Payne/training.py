@@ -87,38 +87,39 @@ class NNTrain:
     '''
 
     def __init__(self, num_neurons = 300, num_steps=10000, learning_rate=1.e-4, batch_size=64,\
-             num_features = 64*5, mask_size=11, num_pixel=7214, batch_size_valid=64):
+             num_features = 64*5, mask_size=11, batch_size_valid=64):
         self.num_neurons = num_neurons
         self.num_steps = int(num_steps)
         self.learning_rate = learning_rate
         self.batch_size = batch_size
         self.num_features = num_features
         self.mask_size = mask_size
-        self.num_pixel = num_pixel
         self.batch_size_valid = batch_size_valid 
         self.CUDA = torch.cuda.is_available()
 
     def train_on_npz(self, npz_path, validation_fraction=0.1):
         data = np.load(npz_path)
-        spectra = data['spectra']
+        spectra = data['flux']
         labels  = data['labels']
+        print('spectra', spectra.shape)
+        print('labels', labels.shape)
         N_total = spectra.shape[0]
         N_valid = int(N_total * validation_fraction)
+        print(N_total, N_valid)
 
         idx = torch.randperm(N_total)
         idx_valid = idx[:N_valid]
         idx_train = idx[N_valid:]
 
-        #assuming that the grid is random
         validation_spectra = spectra[idx_valid,:]
-        validation_labels = labels[:,idx_valid]
+        validation_labels = labels[idx_valid,:]
         training_spectra = spectra[idx_train,:]
-        training_labels = labels[:,idx_train]
+        training_labels = labels[idx_train,:]
 
         if self.batch_size_valid>N_valid:
             self.batch_size_valid = N_valid
 
-        self.train(training_labels.T, training_spectra, validation_labels.T, validation_spectra)
+        self.train(training_labels, training_spectra, validation_labels, validation_spectra)
 
 
     def train(self, training_labels, training_spectra, validation_labels, validation_spectra):
@@ -132,11 +133,11 @@ class NNTrain:
 
         x, y, x_valid, y_valid = self.scale_variables(training_labels, training_spectra, validation_labels, validation_spectra)
 
+
         # assume L1 loss
         self.loss_fn = torch.nn.L1Loss(reduction = 'mean')
-
         # initiate Payne and optimizer
-        model = Perceptron(x.shape[1], self.num_neurons, self.num_pixel)
+        model = Perceptron(x.shape[1], self.num_neurons, training_spectra.shape[1])
         if self.CUDA:
             model.cuda()
         model.train()
