@@ -25,6 +25,7 @@ class Network:
         self.x_min = tmp["x_min"]
         self.x_max = tmp["x_max"]
         self.NN_coeffs = (w_array_0, w_array_1, w_array_2, b_array_0, b_array_1, b_array_2)
+        self.wave = tmp["wave"]
         tmp.close()
 
     def num_labels(self):
