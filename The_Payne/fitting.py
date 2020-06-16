@@ -74,4 +74,23 @@ class Fit:
         # rescale the result back to original unit
         popt[:nnl] = (popt[:nnl]+0.5)*(x_max-x_min) + x_min
         pcov[:nnl,:nnl] = pcov[:nnl,:nnl]*(x_max-x_min)
-        return popt, pcov, model_spec
+        
+        def chi2_func(labels):
+            model = fit_func([], *labels)
+            diff = (norm_spec - model) / spec_err
+            chi2 = np.sum(diff**2)
+            return chi2
+        
+        return popt, pcov, model_spec, chi2_func
+
+
+
+
+
+
+
+
+
+
+
+
